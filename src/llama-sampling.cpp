@@ -16,6 +16,7 @@
 #include <random>
 #include <unordered_map>
 #include <stdexcept>
+#include <tss2/tss2_esys.h>
 
 // the ring buffer works similarly to std::deque, but with a fixed capacity
 template<typename T>
@@ -303,7 +304,35 @@ static void llama_sampler_top_k_impl(llama_token_data_array * cur_p, int32_t k) 
 
 static uint32_t get_rng_seed(uint32_t seed) {
     if (seed == LLAMA_DEFAULT_SEED) {
-        // use system clock if std::random_device is not a true RNG
+        // Attempt TPM 2.0 random number generation first
+        ESYS_CONTEXT* esysContext = nullptr;
+        TSS2_RC rc = Esys_Initialize(&esysContext, nullptr, nullptr);
+        
+        if (rc == TSS2_RC_SUCCESS) {
+            TPM2B_DIGEST* randomBytes = nullptr;
+            rc = Esys_GetRandom(
+                esysContext,
+                ESYS_TR_NONE,
+                ESYS_TR_NONE,
+                ESYS_TR_NONE,
+                4, // Request exactly 4 bytes for uint32_t
+                &randomBytes
+            );
+
+            if (rc == TSS2_RC_SUCCESS && randomBytes && randomBytes->size >= 4) {
+                uint32_t tpmSeed;
+                memcpy(&tpmSeed, randomBytes->buffer, 4);
+                Esys_Free(randomBytes);
+                Esys_Finalize(&esysContext);
+                return tpmSeed;
+            }
+
+            // Cleanup if partial success
+            if (randomBytes) Esys_Free(randomBytes);
+            Esys_Finalize(&esysContext);
+        }
+
+        // Fallback to original logic if TPM fails
         static bool is_rd_prng = std::random_device().entropy() == 0;
         if (is_rd_prng) {
             return (uint32_t) std::chrono::system_clock::now().time_since_epoch().count();

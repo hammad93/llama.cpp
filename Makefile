@@ -948,6 +948,9 @@ ggml/src/ggml-metal-embed.o: \
 endif
 endif # GGML_METAL
 
+# Add TSS2 libraries to linker flags
+MK_LDFLAGS += -ltss2-esys -ltss2-sys -ltss2-mu
+
 DIR_GGML = ggml
 DIR_LLAMA = src
 DIR_COMMON = common
